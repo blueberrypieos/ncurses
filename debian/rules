@@ -1,0 +1,140 @@
+#!/usr/bin/make -f
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 The Blueberry Pie OS Authors
+
+include /usr/share/pietoolchain/rules.mk
+
+NOTICE := $(OBJ)/apsl-notice
+NOTICE_LDFLAGS := -Wl,-sectcreate,__TEXT,__source,$(NOTICE)
+$(NOTICE):
+	@mkdir -p $(OBJ)
+	printf '%s\n' 'This program contains Covered Code under the Apple Public Source License 2.0.' \
+		'Its Source Code is available under that License from https://github.com/blueberrypieos/ncurses.' > $@
+
+S       := $(SRCROOT)/ncurses
+GEN     := $(OBJ)/gen
+HOSTCC  ?= clang-21
+VERSION := 5.4
+
+FLAGS := $(BASE_CFLAGS) -std=gnu99 -DNDEBUG -I$(CURDIR)/debian -I$(GEN) -I$(S)/include -I$(S)/ncurses -I$(S)/menu
+
+LIBS := ncurses panel form menu
+srcs  = $(subst GEN/,$(GEN)/,$(shell cat debian/lib$(1).list))
+objs  = $(patsubst %.c,$(OBJ)/$(1)/%.o,$(subst GEN/,gen/,$(shell cat debian/lib$(1).list)))
+
+all: $(foreach l,$(LIBS),$(OBJ)/lib$(l).$(VERSION).dylib)
+
+HOST_FLAGS := -I$(CURDIR)/debian -I$(GEN) -I$(S)/include -I$(S)/ncurses \
+	'-D__OSX_AVAILABLE(v)=' '-D__IOS_AVAILABLE(v)=' '-D__WATCHOS_AVAILABLE(v)=' \
+	'-D__TVOS_AVAILABLE(v)='
+CAPS    := $(S)/include/Caps
+GEN_CPP := $(CC) -E -isysroot $(SDK) -I$(CURDIR)/debian -I$(GEN) -I$(S)/ncurses -I$(S)/include \
+	-D_XOPEN_SOURCE=600 -DNDEBUG -DSIGWINCH=28
+$(GEN)/.done: debian/rules
+	rm -rf $(GEN)
+	mkdir -p $(GEN)
+	cd $(GEN) && awk -f $(S)/ncurses/tinfo/MKnames.awk bigstrings=1 < $(CAPS) > $(GEN)/names.c
+	cd $(GEN) && { cat $(S)/include/curses.head; AWK=awk sh $(S)/include/MKkey_defs.sh $(CAPS); \
+	  cat $(S)/include/curses.wide $(S)/include/curses.tail; } > $(GEN)/curses.h
+	cd $(GEN) && AWK=awk sh $(S)/include/MKhashsize.sh $(CAPS) > $(GEN)/hashsize.h
+	cd $(GEN) && AWK=awk sh $(S)/include/MKncurses_def.sh $(S)/include/ncurses_defs > $(GEN)/ncurses_def.h
+	cd $(GEN) && awk -f $(S)/include/MKterm.h.awk $(CAPS) > $(GEN)/term.h
+	$(HOSTCC) $(HOST_FLAGS) -o $(GEN)/make_keys $(S)/ncurses/tinfo/make_keys.c
+	$(HOSTCC) $(HOST_FLAGS) -o $(GEN)/make_hash $(S)/ncurses/tinfo/make_hash.c
+	cd $(GEN) && AWK=awk sh $(S)/ncurses/tinfo/MKkeys_list.sh $(CAPS) | sort > $(GEN)/keys.list
+	cd $(GEN) && $(GEN)/make_keys $(GEN)/keys.list > $(GEN)/init_keytry.h
+	cd $(GEN) && AWK=awk sh $(S)/include/MKparametrized.sh $(CAPS) > $(GEN)/parametrized.h
+	cd $(GEN) && printf '%s\n' '#ifndef __TRANSFORM_H' '#define __TRANSFORM_H 1' '#include <progs.priv.h>' \
+		'extern bool same_program(const char *, const char *);' \
+		'#define PROG_CAPTOINFO "captoinfo"' '#define PROG_INFOTOCAP "infotocap"' \
+		'#define PROG_RESET     "reset"' '#define PROG_INIT      "init"' \
+		'#endif /* __TRANSFORM_H */' > $(GEN)/transform.h
+	cd $(GEN) && awk -f $(S)/ncurses/tinfo/MKcodes.awk bigstrings=1 $(CAPS) > $(GEN)/codes.c
+	cd $(GEN) && AWK=awk sh $(S)/ncurses/tinfo/MKcaptab.sh awk 1 $(S)/ncurses/tinfo/MKcaptab.awk $(CAPS) > comp_captab.c
+	cd $(GEN) && AWK=awk sh $(S)/ncurses/tty/MKexpanded.sh "$(GEN_CPP)" > $(GEN)/expanded.c
+	cd $(GEN) && AWK=awk sh $(S)/ncurses/tinfo/MKfallback.sh /usr/share/terminfo $(S)/misc/terminfo.src tic > $(GEN)/fallback.c
+	cd $(GEN) && AWK=awk sh $(S)/ncurses/base/MKlib_gen.sh "$(GEN_CPP)" awk generated < $(GEN)/curses.h > $(GEN)/lib_gen.c
+	cd $(GEN) && awk -f $(S)/ncurses/base/MKkeyname.awk bigstrings=1 $(GEN)/keys.list > $(GEN)/lib_keyname.c
+	cd $(GEN) && AWK=awk sh $(S)/progs/MKtermsort.sh awk $(CAPS) > $(GEN)/termsort.c
+	cd $(GEN) && echo | awk -f $(S)/ncurses/base/MKunctrl.awk bigstrings=1 > $(GEN)/unctrl.c
+	touch $@
+GEN_SRCS := $(sort $(subst GEN/,$(GEN)/,$(filter GEN/%,$(foreach l,$(LIBS),$(shell cat debian/lib$(l).list)))))
+$(GEN_SRCS): $(GEN)/.done ;
+
+define lib_rules
+$(OBJ)/$(1)/gen/%.o: $(GEN)/%.c $(GEN)/.done
+	@mkdir -p $$(dir $$@)
+	$(CC) $(FLAGS) -c $$< -o $$@
+$(OBJ)/$(1)/%.o: $(SRCROOT)/%.c $(GEN)/.done
+	@mkdir -p $$(dir $$@)
+	$(CC) $(FLAGS) -c $$< -o $$@
+$(OBJ)/lib$(1).$(VERSION).dylib: $$(call objs,$(1)) $(if $(filter-out ncurses,$(1)),$(OBJ)/libncurses.$(VERSION).dylib,| $(NOTICE))
+	$(CC) $(BASE_LDFLAGS) $(if $(filter ncurses,$(1)),$(NOTICE_LDFLAGS)) -dynamiclib -install_name /usr/lib/lib$(1).$(VERSION).dylib \
+		-compatibility_version $(VERSION) -current_version $(VERSION) $$^ -o $$@
+endef
+$(foreach l,$(LIBS),$(eval $(call lib_rules,$(l))))
+
+PROGS := clear infocmp tic toe tput tset
+clear_SRCS   := clear.c
+infocmp_SRCS := infocmp.c dump_entry.c
+tic_SRCS     := tic.c transform.c tparm_type.c dump_entry.c
+toe_SRCS     := toe.c
+tput_SRCS    := transform.c tput.c tparm_type.c
+tset_SRCS    := transform.c tset.c
+PROG_FLAGS := $(BASE_CFLAGS) -I$(CURDIR)/debian -I$(GEN) -I$(S)/include -I$(S)/progs
+$(OBJ)/progs/%.o: $(S)/progs/%.c $(GEN)/.done
+	@mkdir -p $(dir $@)
+	$(CC) $(PROG_FLAGS) -c $< -o $@
+define prog_rules
+$(OBJ)/bin/$(1): $$(patsubst %.c,$(OBJ)/progs/%.o,$$($(1)_SRCS)) $(OBJ)/libncurses.$(VERSION).dylib
+	@mkdir -p $$(dir $$@)
+	$(CC) $(BASE_LDFLAGS) $$^ -o $$@
+endef
+$(foreach p,$(PROGS),$(eval $(call prog_rules,$(p))))
+
+all: $(foreach p,$(PROGS),$(OBJ)/bin/$(p))
+
+HOSTTIC ?= tic
+$(OBJ)/terminfo/.done: debian/rules
+	rm -rf $(OBJ)/terminfo
+	mkdir -p $(OBJ)/terminfo
+	$(HOSTTIC) -x -o $(OBJ)/terminfo $(S)/misc/terminfo.src 2> $(OBJ)/tic.log
+	cd $(OBJ)/terminfo && for d in ?; do mv "$$d" "$$(printf %02x "'$$d")"; done
+	cd $(OBJ)/terminfo && find . -type l | while read l; do \
+		t=$$(readlink "$$l"); \
+		case "$$t" in ../?/*) \
+			d=$${t#../}; c=$${d%%/*}; \
+			ln -sfn "../$$(printf %02x "'$$c")/$${d#*/}" "$$l";; \
+		esac; \
+	done
+	touch $@
+
+all: $(OBJ)/terminfo/.done
+
+install: all
+	set -e; for d in $(ROOT); do \
+		install -d $$d/usr/lib; \
+		for l in $(LIBS); do \
+			install -m 755 $(OBJ)/lib$$l.$(VERSION).dylib $$d/usr/lib/; \
+			ln -sf lib$$l.$(VERSION).dylib $$d/usr/lib/lib$$l.dylib; \
+		done; \
+		for l in curses termcap ncurses.5; do ln -sf libncurses.$(VERSION).dylib $$d/usr/lib/lib$$l.dylib; done; \
+	done
+	install -d $(ROOT)/usr/include
+	install -m 644 $(S)/include/tic.h $(S)/menu/eti.h $(S)/panel/panel.h \
+		$(S)/include/ncurses_dll.h $(S)/include/unctrl.h $(S)/include/nc_tparm.h $(GEN)/term.h \
+		$(S)/form/form.h $(S)/include/termcap.h $(GEN)/curses.h $(S)/menu/menu.h \
+		$(S)/include/term_entry.h $(ROOT)/usr/include/
+	ln -sf curses.h $(ROOT)/usr/include/ncurses.h
+	install -d $(ROOT)/usr/bin
+	install -m 755 $(addprefix $(OBJ)/bin/,$(PROGS)) $(ROOT)/usr/bin/
+	ln -sf tset $(ROOT)/usr/bin/reset
+	ln -sf tic $(ROOT)/usr/bin/captoinfo
+	ln -sf tic $(ROOT)/usr/bin/infotocap
+	install -d $(ROOT)/usr/share
+	rm -rf $(ROOT)/usr/share/terminfo
+	cp -a $(OBJ)/terminfo $(ROOT)/usr/share/terminfo
+	rm -f $(ROOT)/usr/share/terminfo/.done
+	bash debian/install-man.sh "$(SRCROOT)" "$(OBJ)" "$(ROOT)"
+
+.PHONY: all install

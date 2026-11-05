@@ -1,0 +1,27 @@
+Source: ncurses
+Section: libs
+Priority: optional
+Maintainer: Maxwell <maxwell@blueberrypieos.com>
+Build-Depends: pietoolchain (>= 0.1.0), clang-21:native
+Standards-Version: 4.7.3
+Homepage: https://github.com/apple-oss-distributions/ncurses
+Vcs-Git: https://github.com/blueberrypieos/ncurses.git -b blueberry-pie-os/latest
+Vcs-Browser: https://github.com/blueberrypieos/ncurses
+Rules-Requires-Root: no
+
+Package: ncurses
+Architecture: darwin-arm64
+Essential: yes
+Priority: required
+Depends: libsystem
+Description: ncurses, its tools and the terminfo database
+ Wide-character ncurses 6.0 libraries, terminal tools and terminal
+ descriptions, including the panel, form and menu libraries.
+
+Package: ncurses-dev
+Section: libdevel
+Architecture: darwin-arm64
+Depends: ncurses (= ${binary:Version})
+Description: ncurses development headers
+ Public headers for the ncurses, panel, form and menu libraries.
+ The library links are provided by the essential ncurses package.
