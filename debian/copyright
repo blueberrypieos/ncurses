@@ -489,6 +489,7 @@ Copyright: 2006-2010, 2012 Free Software Foundation, Inc.
 License: X11-distribute-modifications-variant
 
 Files: ncurses/ncurses/curses.priv.h
+ ncurses/ncurses/tinfo/read_entry.c
 Copyright: 1998-2015 Free Software Foundation, Inc.
  2022 Thomas E. Dickey
  Apple Inc.
@@ -525,12 +526,6 @@ License: X11-distribute-modifications-variant
 
 Files: ncurses/ncurses/tinfo/alloc_entry.c
 Copyright: 1998-2013 Free Software Foundation, Inc.
- 2022 Thomas E. Dickey
- Apple Inc.
-License: X11-distribute-modifications-variant
-
-Files: ncurses/ncurses/tinfo/read_entry.c
-Copyright: 1998-2015 Free Software Foundation, Inc.
  2022 Thomas E. Dickey
  Apple Inc.
 License: X11-distribute-modifications-variant
